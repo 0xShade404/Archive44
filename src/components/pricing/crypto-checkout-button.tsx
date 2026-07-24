@@ -17,6 +17,38 @@ declare global {
 
 type Status = "idle" | "connecting" | "sending" | "confirming" | "done";
 
+const POLL_INTERVAL_MS = 5_000;
+const MAX_POLL_ATTEMPTS = 36; // ~3 minutes — comfortably covers mainnet confirmation times
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The verify endpoint returns quickly (it can't block for a full confirmation
+ * inside one serverless invocation), so a 202 means "still pending" rather
+ * than an error — poll it instead of treating any 2xx as done.
+ */
+async function pollPaymentVerification(txHash: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+    const res = await fetch("/api/v1/payments/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txHash }),
+    });
+    const body = await res.json();
+
+    if (res.status === 202) {
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+
+    return { ok: res.ok, body };
+  }
+
+  return { ok: false, body: { error: "Still confirming on-chain. Check back shortly — your plan will not be charged twice." } };
+}
+
 export function CryptoCheckoutButton() {
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
@@ -63,15 +95,10 @@ export function CryptoCheckoutButton() {
       setStatus("confirming");
       toast.info("Transaction sent. Waiting for confirmation...");
 
-      const verifyRes = await fetch("/api/v1/payments/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash }),
-      });
-      const verifyBody = await verifyRes.json();
+      const { ok, body: verifyBody } = await pollPaymentVerification(txHash);
 
-      if (!verifyRes.ok) {
-        toast.error(verifyBody.error || "Payment verification failed");
+      if (!ok) {
+        toast.error((verifyBody.error as string) || "Payment verification failed");
         setStatus("idle");
         return;
       }
