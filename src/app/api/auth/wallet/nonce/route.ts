@@ -9,6 +9,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "A valid wallet address is required" }, { status: 400 });
   }
 
-  const nonce = createNonce(address);
+  const nonce = await createNonce(address);
   return NextResponse.json({ message: buildSignMessage(address, nonce) });
 }

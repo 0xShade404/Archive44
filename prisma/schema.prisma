@@ -104,6 +104,27 @@ model VerificationToken {
   @@map("verification_tokens")
 }
 
+// Shared, DB-backed so it's consistent across concurrent serverless instances
+// (an in-memory Map would let a nonce issued on one instance go unseen by
+// whichever instance handles the matching sign-in request).
+model WalletNonce {
+  address String   @id
+  nonce   String
+  expires DateTime
+
+  @@map("wallet_nonces")
+}
+
+// Shared, DB-backed for the same reason — a per-instance in-memory counter
+// only limits requests that happen to land on that instance.
+model RateLimitBucket {
+  key     String   @id
+  count   Int      @default(1)
+  resetAt DateTime
+
+  @@map("rate_limit_buckets")
+}
+
 model Subscription {
   id                String             @id @default(cuid())
   userId            String             @unique

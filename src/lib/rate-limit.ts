@@ -1,16 +1,27 @@
-/**
- * Simple in-memory fixed-window rate limiter, keyed by an arbitrary identifier
- * (e.g. IP address or API key). Single-instance only — a multi-instance
- * deployment should back this with Redis instead.
- */
-const buckets = new Map<string, { count: number; resetAt: number }>();
+import { prisma } from "@/lib/prisma";
 
-export function rateLimit(key: string, limit: number, windowMs: number): { ok: boolean; remaining: number } {
-  const now = Date.now();
-  const bucket = buckets.get(key);
+/**
+ * Fixed-window rate limiter backed by the database, so it stays correct
+ * across concurrent serverless instances (an in-memory counter only limits
+ * requests that land on the same instance). Not perfectly atomic under very
+ * high concurrency on the same key, but that's an acceptable tradeoff for
+ * abuse mitigation rather than a hard security boundary.
+ */
+export async function rateLimit(
+  key: string,
+  limit: number,
+  windowMs: number
+): Promise<{ ok: boolean; remaining: number }> {
+  const now = new Date();
+  const bucket = await prisma.rateLimitBucket.findUnique({ where: { key } });
 
   if (!bucket || bucket.resetAt < now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
+    const resetAt = new Date(now.getTime() + windowMs);
+    await prisma.rateLimitBucket.upsert({
+      where: { key },
+      update: { count: 1, resetAt },
+      create: { key, count: 1, resetAt },
+    });
     return { ok: true, remaining: limit - 1 };
   }
 
@@ -18,8 +29,11 @@ export function rateLimit(key: string, limit: number, windowMs: number): { ok: b
     return { ok: false, remaining: 0 };
   }
 
-  bucket.count += 1;
-  return { ok: true, remaining: limit - bucket.count };
+  await prisma.rateLimitBucket.update({
+    where: { key },
+    data: { count: { increment: 1 } },
+  });
+  return { ok: true, remaining: limit - bucket.count - 1 };
 }
 
 export function getClientIp(request: Request): string {
