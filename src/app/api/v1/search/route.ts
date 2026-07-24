@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   if (!authResult.apiKeyId && !authResult.userId) {
     const ip = getClientIp(request);
-    const { ok } = rateLimit(`search:${ip}`, 10, 60_000);
+    const { ok } = await rateLimit(`search:${ip}`, 10, 60_000);
     if (!ok) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Sign in or use an API key for higher limits." },

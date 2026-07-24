@@ -8,7 +8,7 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit";
 const schema = z.object({ email: z.string().trim().toLowerCase().email() });
 
 export async function POST(request: NextRequest) {
-  const { ok } = rateLimit(`forgot-password:${getClientIp(request)}`, 5, 60_000);
+  const { ok } = await rateLimit(`forgot-password:${getClientIp(request)}`, 5, 60_000);
   if (!ok) {
     return NextResponse.json({ error: "Too many attempts. Please try again later." }, { status: 429 });
   }

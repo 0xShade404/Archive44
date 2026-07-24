@@ -42,7 +42,7 @@ const providers: NextAuthConfig["providers"] = [
       if (!credentials?.address || !credentials?.signature) return null;
 
       const address = credentials.address as `0x${string}`;
-      const nonce = consumeNonce(address);
+      const nonce = await consumeNonce(address);
       if (!nonce) return null;
 
       const message = buildSignMessage(address, nonce);
