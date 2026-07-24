@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { hashApiKey } from "@/lib/api-key";
 
 function riskLabel(score: number): "Low" | "Medium" | "High" {
   if (score < 34) return "Low";
@@ -23,7 +24,7 @@ async function authenticateRequest(request: NextRequest): Promise<{ userId: stri
 
   if (authHeader?.startsWith("Bearer ")) {
     const key = authHeader.slice(7).trim();
-    const apiKey = await prisma.apiKey.findUnique({ where: { key } });
+    const apiKey = await prisma.apiKey.findUnique({ where: { key: hashApiKey(key) } });
     if (!apiKey || !apiKey.isActive) return null;
     return { userId: apiKey.userId, apiKeyId: apiKey.id };
   }
