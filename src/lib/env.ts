@@ -13,6 +13,8 @@ const envSchema = z.object({
   USDT_CONTRACT: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().optional(),
 });
 
 type Env = z.infer<typeof envSchema>;
