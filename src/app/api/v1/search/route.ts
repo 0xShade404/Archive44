@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { hashApiKey } from "@/lib/api-key";
+import { generateSearchSummary } from "@/lib/gemini";
 
 function riskLabel(score: number): "Low" | "Medium" | "High" {
   if (score < 34) return "Low";
@@ -139,10 +140,13 @@ export async function GET(request: NextRequest) {
     })),
   ];
 
-  const summary =
+  const templateSummary =
     results.length > 0
       ? `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${q}" across the Archive44 knowledge base.`
       : `No archived entities matched "${q}" yet. Try a wallet address, token symbol, protocol, or founder name.`;
+
+  const aiSummary = await generateSearchSummary(q, results).catch(() => null);
+  const summary = aiSummary ?? templateSummary;
 
   await prisma.search
     .create({
@@ -170,6 +174,7 @@ export async function GET(request: NextRequest) {
     meta: {
       latency_ms: Date.now() - startedAt,
       version: "1.0",
+      ai_generated: aiSummary !== null,
     },
   });
 }
