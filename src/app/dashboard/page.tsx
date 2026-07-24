@@ -126,9 +126,9 @@ export default async function DashboardPage() {
           <CardContent className="space-y-2">
             {[
               { href: "/search", label: "New AI Search", icon: Search },
-              { href: "/dashboard", label: "Watchlists", icon: Eye },
-              { href: "/dashboard", label: "Alerts", icon: Bell },
-              { href: "/dashboard", label: "API Keys", icon: Key },
+              { href: "/dashboard/watchlists", label: "Watchlists", icon: Eye },
+              { href: "/dashboard/alerts", label: "Alerts", icon: Bell },
+              { href: "/dashboard/api-keys", label: "API Keys", icon: Key },
               { href: "/settings", label: "Billing", icon: CreditCard },
               { href: "/settings", label: "Settings", icon: Settings },
             ].map((item) => (
