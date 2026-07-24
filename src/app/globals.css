@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 50% 6%;
+    --foreground: 0 0% 98%;
+    --card: 210 45% 10%;
+    --card-foreground: 0 0% 98%;
+    --popover: 210 45% 10%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 45 90% 61%;
+    --primary-foreground: 210 50% 6%;
+    --secondary: 210 40% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 210 40% 16%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 45 90% 61%;
+    --accent-foreground: 210 50% 6%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 210 30% 18%;
+    --input: 210 30% 18%;
+    --ring: 45 90% 61%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-navy text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+  .glass-strong {
+    @apply bg-white/10 backdrop-blur-2xl border border-white/20;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-gold-300 via-gold to-gold-600 bg-clip-text text-transparent;
+  }
+  .gradient-border {
+    @apply relative;
+  }
+  .gradient-border::before {
+    content: "";
+    @apply absolute inset-0 rounded-[inherit] p-[1px];
+    background: linear-gradient(135deg, rgba(245, 197, 66, 0.5), transparent, rgba(245, 197, 66, 0.2));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+}
