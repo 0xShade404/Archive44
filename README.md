@@ -14,7 +14,7 @@ AI-powered crypto intelligence platform that permanently archives and organizes 
 - **Entity Profiles** — Wallets, Tokens, Protocols, Founders, rendered from Postgres via Prisma
 - **Risk Scoring** — Stored per-entity, surfaced as Low/Medium/High badges
 - **Saved Wallets/Tokens & Alerts** — Persisted per user
-- **Crypto-Native Payments** — Pay in ETH from an injected wallet (MetaMask, etc.); the backend verifies the on-chain transaction before activating the Pro plan. USDT and other chains are not yet wired up.
+- **Crypto-Native Payments** — Pay in ETH or USDT (ERC-20) from an injected wallet (MetaMask, etc.); the backend verifies the on-chain transaction — including decoding the USDT transfer calldata — before activating the Pro plan. Other chains are not yet wired up.
 - **REST API** — `/api/v1/search` supports API-key auth (`Authorization: Bearer <key>`) for Pro/Enterprise access, in addition to first-party session auth
 - **Dashboard** — Real per-user stats (searches, saved entities, active alerts) and subscription plan
 
@@ -100,14 +100,14 @@ prisma/
 
 ## Crypto Payments
 
-Payment flow (Pro plan, ETH only today):
+Payment flow (Pro plan) — accepts both ETH and USDT (ERC-20) to the same wallet:
 
-1. Sign in, then connect an injected wallet (e.g. MetaMask) from the Pricing page
-2. Send the required ETH amount (`NEXT_PUBLIC_PRO_PLAN_ETH`) to `PAYMENT_WALLET_ETH`
-3. The backend verifies the transaction on-chain (recipient, amount, confirmation) via `ETH_RPC_URL`
+1. Sign in, then connect an injected wallet (e.g. MetaMask) from the Pricing page and pick ETH or USDT
+2. **ETH**: sends the required amount (`NEXT_PUBLIC_PRO_PLAN_ETH`) directly to `PAYMENT_WALLET_ETH`. **USDT**: calls `transfer()` on `USDT_CONTRACT` for the required amount (`NEXT_PUBLIC_PRO_PLAN_USDT`), with `PAYMENT_WALLET_ETH` as the recipient
+3. The backend verifies the transaction on-chain via `ETH_RPC_URL` — for USDT it decodes the `transfer` calldata to confirm the recipient and amount, since the on-chain `to` is the token contract, not the wallet
 4. Subscription is upgraded to Pro for 30 days once verified
 
-USDT and additional chains (Base, Arbitrum, Optimism, Solana, BNB) are not implemented yet.
+Additional chains (Base, Arbitrum, Optimism, Solana, BNB) are not implemented yet — only Ethereum mainnet.
 
 ## Environment Variables
 
