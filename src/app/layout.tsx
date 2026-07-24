@@ -12,6 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   title: {
     default: "Archive44 — The Memory Layer of Crypto",
     template: "%s | Archive44",
@@ -32,7 +33,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://archive44.com",
+    url: process.env.NEXT_PUBLIC_APP_URL || "https://archive44.com",
     siteName: "Archive44",
     title: "Archive44 — The Memory Layer of Crypto",
     description:

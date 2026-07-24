@@ -5,6 +5,10 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { publicClient } from "@/lib/eth";
 
+// Keep well under serverless function duration limits (e.g. Vercel Hobby's
+// 10s default) — the client polls this endpoint instead of one long wait.
+export const maxDuration = 10;
+
 const schema = z.object({
   txHash: z.string().refine((v) => isHex(v) && v.length === 66, "Invalid transaction hash"),
 });
@@ -40,7 +44,7 @@ export async function POST(request: NextRequest) {
 
   let receipt;
   try {
-    receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 });
+    receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 8_000 });
   } catch {
     return NextResponse.json(
       { error: "Transaction not confirmed yet. Please wait and try again." },
