@@ -48,7 +48,7 @@ ${context}
 Write a concise 2-3 sentence synthesized summary of these results for the user. Only use information given above — do not invent facts, prices, dates, or relationships that aren't stated. If the results don't fully answer the query, say so plainly.`;
 
   try {
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
