@@ -16,7 +16,6 @@ export interface TokenProfile {
   symbol: string;
   decimals: number;
   priceUsd: number | null;
-  priceChange24h: number | null;
   logoUrl: string | null;
   recentTransfers: {
     hash: string;
@@ -25,6 +24,27 @@ export interface TokenProfile {
     value: string;
     timestamp: string;
   }[];
+}
+
+// Shapes below match Moralis's documented raw JSON API responses
+// (snake_case), which are stable across SDK versions — see note in wallet.ts.
+interface RawTokenMetadata {
+  name: string | null;
+  symbol: string | null;
+  decimals: string | null;
+  logo: string | null;
+}
+
+interface RawTokenPrice {
+  usdPrice: number;
+}
+
+interface RawTokenTransfer {
+  transaction_hash: string;
+  from_address: string;
+  to_address: string;
+  value: string;
+  block_timestamp: string;
 }
 
 /**
@@ -54,29 +74,24 @@ export async function getTokenProfile(
     }),
   ]);
 
-  // This SDK version wraps token fields under `.token`, not flat on the result item.
-  const entry = metadata.result[0];
-  const meta = entry.token;
+  const metaRaw = metadata.raw[0] as unknown as RawTokenMetadata;
+  const priceRaw = price ? (price.raw as unknown as RawTokenPrice) : null;
+  const transfersRaw = transfers.raw.result as unknown as RawTokenTransfer[];
 
   return {
     address: contractAddress,
     chain: chainName,
-    name: meta.name ?? "Unknown Token",
-    symbol: meta.symbol ?? "?",
-    decimals: Number(meta.decimals ?? 18),
-    priceUsd: price ? price.result.usdPrice : null,
-    priceChange24h: price
-      ? price.result["24hrPercentChange"]
-        ? Number(price.result["24hrPercentChange"])
-        : null
-      : null,
-    logoUrl: meta.logo ?? null,
-    recentTransfers: transfers.result.map((t) => ({
-      hash: t.transactionHash,
-      from: t.fromAddress.checksum,
-      to: t.toAddress.checksum,
-      value: t.value?.toString() ?? "0",
-      timestamp: t.blockTimestamp.toISOString(),
+    name: metaRaw.name ?? "Unknown Token",
+    symbol: metaRaw.symbol ?? "?",
+    decimals: Number(metaRaw.decimals ?? 18),
+    priceUsd: priceRaw ? priceRaw.usdPrice : null,
+    logoUrl: metaRaw.logo ?? null,
+    recentTransfers: transfersRaw.map((t) => ({
+      hash: t.transaction_hash,
+      from: t.from_address,
+      to: t.to_address,
+      value: t.value,
+      timestamp: t.block_timestamp,
     })),
   };
 }
