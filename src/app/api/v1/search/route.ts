@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { getWalletProfile } from "@/lib/wallet";
 import { getTokenProfile } from "@/lib/token";
-
-const prisma = new PrismaClient();
 
 // How long a cached entity is considered fresh before re-fetching from Moralis.
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
