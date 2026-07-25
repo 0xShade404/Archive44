@@ -82,7 +82,9 @@ export async function getWalletProfile(
   const [nativeBalance, tokenBalances, nfts, netWorth, transactions] =
     await Promise.all([
       Moralis.EvmApi.balance.getNativeBalance({ address, chain }),
-      Moralis.EvmApi.token.getWalletTokenBalances({ address, chain }),
+      Moralis.EvmApi.token
+        .getWalletTokenBalances({ address, chain })
+        .catch(() => null), // some wallets (e.g. spam-flooded) exceed Moralis's token count limit
       Moralis.EvmApi.nft.getWalletNFTs({ address, chain, limit: 25 }),
       Moralis.EvmApi.wallets
         .getWalletNetWorth({ address, chains: [chain] })
@@ -94,7 +96,9 @@ export async function getWalletProfile(
       }),
     ]);
 
-  const tokensRaw = tokenBalances.raw as unknown as RawTokenBalance[];
+  const tokensRaw = tokenBalances
+    ? (tokenBalances.raw as unknown as RawTokenBalance[])
+    : [];
   const nftsRaw = nfts.raw.result as unknown as RawNft[];
   const txRaw = transactions.raw.result as unknown as RawTransaction[];
   const netWorthRaw = netWorth
