@@ -88,7 +88,7 @@ export async function getWalletProfile(
       hash: tx.hash,
       from: tx.fromAddress.checksum,
       to: tx.toAddress?.checksum ?? "",
-      value: tx.value,
+      value: tx.value?.toString() ?? "0",
       timestamp: tx.blockTimestamp.toISOString(),
     })),
   };
