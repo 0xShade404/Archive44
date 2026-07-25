@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getWalletProfile } from "@/lib/wallet";
 import { getTokenProfile } from "@/lib/token";
@@ -28,6 +29,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: "type must be wallet or token" }, { status: 400 });
 }
 
+// Converts any JSON-serializable object into a Prisma-safe InputJsonValue,
+// avoiding `any` while still accepting our loosely-typed Moralis profile shape.
+function toJsonValue(data: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
+}
+
 async function handleWallet(address: string) {
   const existing = await prisma.wallet.findUnique({ where: { address } });
 
@@ -37,26 +44,23 @@ async function handleWallet(address: string) {
 
   try {
     const profile = await getWalletProfile(address, "ethereum");
+    const latestTx = profile.recentTransactions[0];
 
     const wallet = await prisma.wallet.upsert({
       where: { address },
       update: {
         balanceEth: parseFloat(profile.nativeBalance) || 0,
         txCount: profile.recentTransactions.length,
-        lastActive: profile.recentTransactions[0]
-          ? new Date(profile.recentTransactions[0].timestamp)
-          : undefined,
-        metadata: profile as any,
+        lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
+        metadata: toJsonValue(profile),
       },
       create: {
         address,
         balanceEth: parseFloat(profile.nativeBalance) || 0,
         txCount: profile.recentTransactions.length,
         firstSeen: new Date(),
-        lastActive: profile.recentTransactions[0]
-          ? new Date(profile.recentTransactions[0].timestamp)
-          : undefined,
-        metadata: profile as any,
+        lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
+        metadata: toJsonValue(profile),
       },
     });
 
@@ -77,7 +81,7 @@ async function handleToken(address: string, chain: string) {
   }
 
   try {
-    const profile = await getTokenProfile(address, chain as any);
+    const profile = await getTokenProfile(address, chain as "ethereum" | "base" | "polygon" | "bsc" | "arbitrum");
 
     const token = await prisma.token.upsert({
       where: { address_chain: { address, chain } },
@@ -86,7 +90,7 @@ async function handleToken(address: string, chain: string) {
         name: profile.name,
         decimals: profile.decimals,
         priceUsd: profile.priceUsd ?? undefined,
-        metadata: profile as any,
+        metadata: toJsonValue(profile),
       },
       create: {
         address,
@@ -95,7 +99,7 @@ async function handleToken(address: string, chain: string) {
         name: profile.name,
         decimals: profile.decimals,
         priceUsd: profile.priceUsd ?? undefined,
-        metadata: profile as any,
+        metadata: toJsonValue(profile),
       },
     });
 
