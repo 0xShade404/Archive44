@@ -21,36 +21,89 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 1. Check Prisma cache first — avoids burning Moralis compute units
-  //    on repeat lookups of the same wallet/token.
-  const cached = await prisma.entityCache.findUnique({
-    where: { address_chain_type: { address, chain, type } },
-  });
-
-  if (cached && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS) {
-    return NextResponse.json({ source: "cache", data: cached.data });
+  if (type === "wallet") {
+    return handleWallet(address);
+  } else if (type === "token") {
+    return handleToken(address, chain);
   }
 
-  // 2. Cache miss or stale — fetch fresh data from Moralis.
-  try {
-    const data =
-      type === "wallet"
-        ? await getWalletProfile(address, chain as any)
-        : await getTokenProfile(address, chain as any);
+  return NextResponse.json({ error: "type must be wallet or token" }, { status: 400 });
+}
 
-    // 3. Upsert into cache for next time.
-    await prisma.entityCache.upsert({
-      where: { address_chain_type: { address, chain, type } },
-      update: { data: data as any, updatedAt: new Date() },
-      create: { address, chain, type, data: data as any },
+async function handleWallet(address: string) {
+  const existing = await prisma.wallet.findUnique({ where: { address } });
+
+  if (existing && Date.now() - existing.updatedAt.getTime() < CACHE_TTL_MS) {
+    return NextResponse.json({ source: "cache", data: existing });
+  }
+
+  try {
+    const profile = await getWalletProfile(address, "ethereum");
+
+    const wallet = await prisma.wallet.upsert({
+      where: { address },
+      update: {
+        balanceEth: parseFloat(profile.nativeBalance) || 0,
+        txCount: profile.recentTransactions.length,
+        lastActive: profile.recentTransactions[0]
+          ? new Date(profile.recentTransactions[0].timestamp)
+          : undefined,
+        metadata: profile as any,
+      },
+      create: {
+        address,
+        balanceEth: parseFloat(profile.nativeBalance) || 0,
+        txCount: profile.recentTransactions.length,
+        firstSeen: new Date(),
+        lastActive: profile.recentTransactions[0]
+          ? new Date(profile.recentTransactions[0].timestamp)
+          : undefined,
+        metadata: profile as any,
+      },
     });
 
-    return NextResponse.json({ source: "live", data });
+    return NextResponse.json({ source: "live", data: wallet });
   } catch (err) {
-    console.error("Moralis lookup failed:", err);
-    return NextResponse.json(
-      { error: "Failed to fetch entity data" },
-      { status: 502 }
-    );
+    console.error("Moralis wallet lookup failed:", err);
+    return NextResponse.json({ error: "Failed to fetch wallet data" }, { status: 502 });
+  }
+}
+
+async function handleToken(address: string, chain: string) {
+  const existing = await prisma.token.findUnique({
+    where: { address_chain: { address, chain } },
+  });
+
+  if (existing && Date.now() - existing.updatedAt.getTime() < CACHE_TTL_MS) {
+    return NextResponse.json({ source: "cache", data: existing });
+  }
+
+  try {
+    const profile = await getTokenProfile(address, chain as any);
+
+    const token = await prisma.token.upsert({
+      where: { address_chain: { address, chain } },
+      update: {
+        symbol: profile.symbol,
+        name: profile.name,
+        decimals: profile.decimals,
+        priceUsd: profile.priceUsd ?? undefined,
+        metadata: profile as any,
+      },
+      create: {
+        address,
+        chain,
+        symbol: profile.symbol,
+        name: profile.name,
+        decimals: profile.decimals,
+        priceUsd: profile.priceUsd ?? undefined,
+        metadata: profile as any,
+      },
+    });
+
+    return NextResponse.json({ source: "live", data: token });
+  } catch (err) {
+    console.error("Moralis token lookup failed:", err);
+    return NextResponse.json({ error: "Failed to fetch token data" }, { status: 502 });
   }
 }
