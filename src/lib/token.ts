@@ -54,7 +54,9 @@ export async function getTokenProfile(
     }),
   ]);
 
-  const meta = metadata.result[0];
+  // This SDK version wraps token fields under `.token`, not flat on the result item.
+  const entry = metadata.result[0];
+  const meta = entry.token;
 
   return {
     address: contractAddress,
