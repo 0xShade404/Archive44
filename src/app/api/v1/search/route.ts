@@ -1,111 +1,180 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getWalletProfile } from "@/lib/wallet";
-import { getTokenProfile } from "@/lib/token";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { hashApiKey } from "@/lib/api-key";
+import { generateSearchSummary } from "@/lib/gemini";
 
-// How long a cached entity is considered fresh before re-fetching from Moralis.
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const address = searchParams.get("address");
-  const type = searchParams.get("type"); // "wallet" | "token"
-  const chain = searchParams.get("chain") ?? "ethereum";
-
-  if (!address || !type) {
-    return NextResponse.json(
-      { error: "Missing required params: address, type" },
-      { status: 400 }
-    );
-  }
-
-  if (type === "wallet") {
-    return handleWallet(address);
-  } else if (type === "token") {
-    return handleToken(address, chain);
-  }
-
-  return NextResponse.json({ error: "type must be wallet or token" }, { status: 400 });
+function riskLabel(score: number): "Low" | "Medium" | "High" {
+  if (score < 34) return "Low";
+  if (score < 67) return "Medium";
+  return "High";
 }
 
-// Converts any JSON-serializable object into a Prisma-safe InputJsonValue,
-// avoiding `any` while still accepting our loosely-typed Moralis profile shape.
-function toJsonValue(data: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
-}
+type SearchResult = {
+  type: "wallet" | "token" | "protocol" | "founder";
+  title: string;
+  subtitle: string;
+  summary: string;
+  risk: "Low" | "Medium" | "High";
+  href: string;
+};
 
-async function handleWallet(address: string) {
-  const existing = await prisma.wallet.findUnique({ where: { address } });
+async function authenticateRequest(request: NextRequest): Promise<{ userId: string | null; apiKeyId: string | null } | null> {
+  const authHeader = request.headers.get("authorization");
 
-  if (existing && Date.now() - existing.updatedAt.getTime() < CACHE_TTL_MS) {
-    return NextResponse.json({ source: "cache", data: existing });
+  if (authHeader?.startsWith("Bearer ")) {
+    const key = authHeader.slice(7).trim();
+    const apiKey = await prisma.apiKey.findUnique({ where: { key: hashApiKey(key) } });
+    if (!apiKey || !apiKey.isActive) return null;
+    return { userId: apiKey.userId, apiKeyId: apiKey.id };
   }
 
-  try {
-    const profile = await getWalletProfile(address, "ethereum");
-    const latestTx = profile.recentTransactions[0];
+  const session = await auth();
+  if (session?.user) return { userId: session.user.id, apiKeyId: null };
 
-    const wallet = await prisma.wallet.upsert({
-      where: { address },
-      update: {
-        balanceEth: parseFloat(profile.nativeBalance) || 0,
-        txCount: profile.recentTransactions.length,
-        lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
-        metadata: toJsonValue(profile),
+  return { userId: null, apiKeyId: null };
+}
+
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const q = searchParams.get("q")?.trim();
+
+  if (!q) {
+    return NextResponse.json({ error: "Query parameter 'q' is required" }, { status: 400 });
+  }
+
+  const authResult = await authenticateRequest(request);
+  if (authResult === null) {
+    return NextResponse.json({ error: "Invalid or inactive API key" }, { status: 401 });
+  }
+
+  if (!authResult.apiKeyId && !authResult.userId) {
+    const ip = getClientIp(request);
+    const { ok } = await rateLimit(`search:${ip}`, 10, 60_000);
+    if (!ok) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded. Sign in or use an API key for higher limits." },
+        { status: 429 }
+      );
+    }
+  }
+
+  const startedAt = Date.now();
+
+  const [wallets, tokens, protocols, founders] = await Promise.all([
+    prisma.wallet.findMany({
+      where: {
+        OR: [
+          { address: { equals: q, mode: "insensitive" } },
+          { ens: { contains: q, mode: "insensitive" } },
+          { label: { contains: q, mode: "insensitive" } },
+          { tags: { has: q.toLowerCase() } },
+        ],
       },
-      create: {
-        address,
-        balanceEth: parseFloat(profile.nativeBalance) || 0,
-        txCount: profile.recentTransactions.length,
-        firstSeen: new Date(),
-        lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
-        metadata: toJsonValue(profile),
+      take: 5,
+    }),
+    prisma.token.findMany({
+      where: {
+        OR: [
+          { address: { equals: q, mode: "insensitive" } },
+          { symbol: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+        ],
       },
-    });
+      take: 5,
+    }),
+    prisma.protocol.findMany({
+      where: {
+        OR: [
+          { slug: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+          { category: { contains: q, mode: "insensitive" } },
+        ],
+      },
+      take: 5,
+    }),
+    prisma.founder.findMany({
+      where: {
+        OR: [
+          { slug: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+        ],
+      },
+      take: 5,
+    }),
+  ]);
 
-    return NextResponse.json({ source: "live", data: wallet });
-  } catch (err) {
-    console.error("Moralis wallet lookup failed:", err);
-    return NextResponse.json({ error: "Failed to fetch wallet data" }, { status: 502 });
+  const results: SearchResult[] = [
+    ...wallets.map((w) => ({
+      type: "wallet" as const,
+      title: w.address,
+      subtitle: w.ens || w.label || "Wallet",
+      summary: w.aiSummary || "No summary available yet for this wallet.",
+      risk: riskLabel(w.riskScore),
+      href: `/wallet/${w.address}`,
+    })),
+    ...tokens.map((t) => ({
+      type: "token" as const,
+      title: t.symbol,
+      subtitle: t.name,
+      summary: t.aiSummary || "No summary available yet for this token.",
+      risk: riskLabel(t.riskScore),
+      href: `/token/${t.address}`,
+    })),
+    ...protocols.map((p) => ({
+      type: "protocol" as const,
+      title: p.name,
+      subtitle: p.category || "Protocol",
+      summary: p.aiSummary || p.description || "No summary available yet for this protocol.",
+      risk: riskLabel(p.riskScore),
+      href: `/protocol/${p.slug}`,
+    })),
+    ...founders.map((f) => ({
+      type: "founder" as const,
+      title: f.name,
+      subtitle: "Founder",
+      summary: f.aiSummary || f.bio || "No summary available yet for this founder.",
+      risk: riskLabel(f.riskScore),
+      href: `/founder/${f.slug}`,
+    })),
+  ];
+
+  const templateSummary =
+    results.length > 0
+      ? `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${q}" across the Archive44 knowledge base.`
+      : `No archived entities matched "${q}" yet. Try a wallet address, token symbol, protocol, or founder name.`;
+
+  const aiSummary = await generateSearchSummary(q, results).catch(() => null);
+  const summary = aiSummary ?? templateSummary;
+
+  await prisma.search
+    .create({
+      data: {
+        userId: authResult.userId,
+        query: q,
+        results: results as unknown as object,
+      },
+    })
+    .catch((err) => console.error("Failed to record search history", err));
+
+  if (authResult.apiKeyId) {
+    await prisma.apiKey
+      .update({
+        where: { id: authResult.apiKeyId },
+        data: { lastUsed: new Date(), requests: { increment: 1 } },
+      })
+      .catch((err) => console.error("Failed to update API key usage", err));
   }
-}
 
-async function handleToken(address: string, chain: string) {
-  const existing = await prisma.token.findUnique({
-    where: { address_chain: { address, chain } },
+  return NextResponse.json({
+    query: q,
+    summary,
+    results,
+    meta: {
+      latency_ms: Date.now() - startedAt,
+      version: "1.0",
+      ai_generated: aiSummary !== null,
+    },
   });
-
-  if (existing && Date.now() - existing.updatedAt.getTime() < CACHE_TTL_MS) {
-    return NextResponse.json({ source: "cache", data: existing });
-  }
-
-  try {
-    const profile = await getTokenProfile(address, chain as "ethereum" | "base" | "polygon" | "bsc" | "arbitrum");
-
-    const token = await prisma.token.upsert({
-      where: { address_chain: { address, chain } },
-      update: {
-        symbol: profile.symbol,
-        name: profile.name,
-        decimals: profile.decimals,
-        priceUsd: profile.priceUsd ?? undefined,
-        metadata: toJsonValue(profile),
-      },
-      create: {
-        address,
-        chain,
-        symbol: profile.symbol,
-        name: profile.name,
-        decimals: profile.decimals,
-        priceUsd: profile.priceUsd ?? undefined,
-        metadata: toJsonValue(profile),
-      },
-    });
-
-    return NextResponse.json({ source: "live", data: token });
-  } catch (err) {
-    console.error("Moralis token lookup failed:", err);
-    return NextResponse.json({ error: "Failed to fetch token data" }, { status: 502 });
-  }
 }
