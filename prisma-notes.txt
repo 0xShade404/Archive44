@@ -1,0 +1,12 @@
+No schema changes needed.
+
+Your existing Wallet and Token models already have everything required:
+- Wallet.address (unique) -> used as the cache key
+- Wallet.metadata (Json)  -> stores the full raw Moralis profile
+- Wallet.updatedAt        -> used to check cache freshness (15 min TTL)
+- Token.[address, chain] (unique) -> used as the cache key
+- Token.metadata (Json)           -> stores the full raw Moralis profile
+
+The search route now upserts directly into these tables instead of a
+separate cache table, so your risk-scoring, aiSummary, and entity profile
+pages can read from the same Wallet/Token rows without any extra joins.
