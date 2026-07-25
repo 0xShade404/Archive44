@@ -75,7 +75,7 @@ export async function getTokenProfile(
       hash: t.transactionHash,
       from: t.fromAddress.checksum,
       to: t.toAddress.checksum,
-      value: t.value,
+      value: t.value?.toString() ?? "0",
       timestamp: t.blockTimestamp.toISOString(),
     })),
   };
