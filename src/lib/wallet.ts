@@ -66,6 +66,40 @@ interface RawNetWorth {
   total_networth_usd: string;
 }
 
+export interface WalletTimelineEvent {
+  date: string;
+  event: string;
+}
+
+/**
+ * Builds a human-readable activity timeline from the wallet's recent
+ * transactions — feeds the "Timeline" card on the wallet profile page.
+ * Note: only covers the last 10 transactions we fetch; a wallet with more
+ * activity than that will show a partial timeline, not full history.
+ */
+export function buildWalletTimeline(
+  profile: WalletProfile,
+  address: string
+): WalletTimelineEvent[] {
+  return profile.recentTransactions.map((tx) => {
+    const valueEth = (parseFloat(tx.value) / 1e18).toFixed(4);
+    const isOutgoing = tx.from.toLowerCase() === address.toLowerCase();
+    const counterparty = isOutgoing ? tx.to : tx.from;
+    const shortCounterparty = counterparty
+      ? `${counterparty.slice(0, 6)}...${counterparty.slice(-4)}`
+      : "unknown address";
+
+    const event = isOutgoing
+      ? `Sent ${valueEth} ETH to ${shortCounterparty}`
+      : `Received ${valueEth} ETH from ${shortCounterparty}`;
+
+    return {
+      date: tx.timestamp.split("T")[0],
+      event,
+    };
+  });
+}
+
 /**
  * Pulls a full wallet profile from Moralis: native balance, ERC-20 holdings,
  * NFTs, and recent transaction history. This is the core data feed for
