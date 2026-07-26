@@ -125,7 +125,7 @@ function SearchContent() {
       {error && !isSearching && (
         <div className="max-w-3xl mx-auto">
           <Card className="border-destructive/30">
-            <CardContent className="p-6 text-sm text-destructive">{error}</CardContent>
+            <CardContent className="p-6 text-sm text-destructive break-words">{error}</CardContent>
           </Card>
         </div>
       )}
@@ -144,7 +144,7 @@ function SearchContent() {
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground leading-relaxed">{aiSummary}</p>
+              <p className="text-muted-foreground leading-relaxed break-words">{aiSummary}</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -164,7 +164,7 @@ function SearchContent() {
                 <Card className="hover:border-gold/30 transition-all cursor-pointer group">
                   <CardContent className="p-6">
                     <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-2">
                           <Badge variant="outline" className="gap-1">
                             {typeIcons[result.type]}
@@ -176,11 +176,11 @@ function SearchContent() {
                             Risk: {result.risk}
                           </Badge>
                         </div>
-                        <h3 className="font-semibold text-lg group-hover:text-gold transition-colors">
+                        <h3 className="font-semibold text-lg group-hover:text-gold transition-colors break-words">
                           {result.title}
                         </h3>
-                        <p className="text-sm text-muted-foreground mb-2">{result.subtitle}</p>
-                        <p className="text-sm text-muted-foreground leading-relaxed">
+                        <p className="text-sm text-muted-foreground mb-2 break-words">{result.subtitle}</p>
+                        <p className="text-sm text-muted-foreground leading-relaxed break-words">
                           {result.summary}
                         </p>
                       </div>
