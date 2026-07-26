@@ -29,7 +29,7 @@ export function Navbar() {
               src="/logo.jpg"
               alt="Archive44 logo"
               fill
-              className="object-cover"
+              className="object-contain"
               priority
             />
           </div>
