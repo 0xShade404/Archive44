@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getWalletProfile, buildWalletTimeline } from "@/lib/wallet";
 import { getTokenProfile } from "@/lib/token";
+import { getTokenHolderStats } from "@/lib/holders";
 import { getSolanaTokenProfile, getSolanaWalletProfile } from "@/lib/solana";
 import { computeWalletRiskScore } from "@/lib/risk";
 import { generateSearchSummary } from "@/lib/gemini";
@@ -166,6 +167,9 @@ async function handleToken(address: string, chain: string) {
 
   try {
     const profile = await getTokenProfile(address, chain as "ethereum" | "base" | "polygon" | "bsc" | "arbitrum");
+    const holderStats = await getTokenHolderStats(address, chain as "ethereum" | "base" | "polygon" | "bsc" | "arbitrum").catch(
+      () => null
+    );
 
     const token = await prisma.token.upsert({
       where: { address_chain: { address, chain } },
@@ -174,7 +178,10 @@ async function handleToken(address: string, chain: string) {
         name: profile.name,
         decimals: profile.decimals,
         priceUsd: profile.priceUsd ?? undefined,
-        metadata: toJsonValue(profile),
+        totalSupply: profile.totalSupplyFormatted ?? undefined,
+        marketCap: profile.marketCapUsd ?? undefined,
+        holders: holderStats?.totalHolders ?? undefined,
+        metadata: toJsonValue({ ...profile, holderStats }),
       },
       create: {
         address,
@@ -183,7 +190,10 @@ async function handleToken(address: string, chain: string) {
         name: profile.name,
         decimals: profile.decimals,
         priceUsd: profile.priceUsd ?? undefined,
-        metadata: toJsonValue(profile),
+        totalSupply: profile.totalSupplyFormatted ?? undefined,
+        marketCap: profile.marketCapUsd ?? undefined,
+        holders: holderStats?.totalHolders ?? undefined,
+        metadata: toJsonValue({ ...profile, holderStats }),
       },
     });
 
