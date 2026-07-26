@@ -5,6 +5,7 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { hashApiKey } from "@/lib/api-key";
 import { generateSearchSummary } from "@/lib/gemini";
 import { getWalletProfile, buildWalletTimeline } from "@/lib/wallet";
+import { extractRelatedWallets } from "@/lib/related";
 import { getTokenProfile } from "@/lib/token";
 import { getTokenHolderStats } from "@/lib/holders";
 import { getSolanaTokenProfile, getSolanaWalletProfile } from "@/lib/solana";
@@ -212,9 +213,11 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
       oldestKnownTxTimestamp: oldestTx ? oldestTx.timestamp : null,
       txCount: walletProfile.recentTransactions.length,
       nativeBalanceEth: parseFloat(walletProfile.nativeBalance) || 0,
+      counterpartyAddresses: extractRelatedWallets(walletProfile, address),
     });
 
     const timeline = buildWalletTimeline(walletProfile, address);
+    const relatedWallets = extractRelatedWallets(walletProfile, address);
 
     const wallet = await prisma.wallet.upsert({
       where: { address },
@@ -222,7 +225,7 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
         balanceEth: parseFloat(walletProfile.nativeBalance) || 0,
         txCount: walletProfile.recentTransactions.length,
         riskScore,
-        metadata: toJsonValue({ ...walletProfile, timeline }),
+        metadata: toJsonValue({ ...walletProfile, timeline, relatedWallets }),
       },
       create: {
         address,
@@ -230,7 +233,7 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
         txCount: walletProfile.recentTransactions.length,
         firstSeen: new Date(),
         riskScore,
-        metadata: toJsonValue({ ...walletProfile, timeline }),
+        metadata: toJsonValue({ ...walletProfile, timeline, relatedWallets }),
       },
     });
 
