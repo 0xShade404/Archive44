@@ -76,7 +76,6 @@ async function handleWallet(address: string, chain: string) {
         subtitle: "Wallet",
         summary: `Balance: ${profile.nativeBalance} ETH. ${profile.recentTransactions.length} recent transactions. Risk score: ${riskScore}/100.`,
         risk: riskScore < 34 ? "Low" : riskScore < 67 ? "Medium" : "High",
-        href: `/wallet/${address}`,
       },
     ]).catch(() => null);
 
