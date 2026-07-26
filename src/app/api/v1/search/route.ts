@@ -6,6 +6,7 @@ import { hashApiKey } from "@/lib/api-key";
 import { generateSearchSummary } from "@/lib/gemini";
 import { getWalletProfile, buildWalletTimeline } from "@/lib/wallet";
 import { getTokenProfile } from "@/lib/token";
+import { getTokenHolderStats } from "@/lib/holders";
 import { getSolanaTokenProfile, getSolanaWalletProfile } from "@/lib/solana";
 import { computeWalletRiskScore } from "@/lib/risk";
 import { Prisma } from "@prisma/client";
@@ -161,6 +162,11 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
   const evmToken = await tryEvmTokenAcrossChains(address);
   if (evmToken) {
     const { chain, profile: tokenProfile } = evmToken;
+    const holderStats = await getTokenHolderStats(
+      address,
+      chain as "ethereum" | "base" | "polygon" | "bsc" | "arbitrum"
+    ).catch(() => null);
+
     const token = await prisma.token.upsert({
       where: { address_chain: { address, chain } },
       update: {
@@ -168,7 +174,10 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
         name: tokenProfile.name,
         decimals: tokenProfile.decimals,
         priceUsd: tokenProfile.priceUsd ?? undefined,
-        metadata: toJsonValue(tokenProfile),
+        totalSupply: tokenProfile.totalSupplyFormatted ?? undefined,
+        marketCap: tokenProfile.marketCapUsd ?? undefined,
+        holders: holderStats?.totalHolders ?? undefined,
+        metadata: toJsonValue({ ...tokenProfile, holderStats }),
       },
       create: {
         address,
@@ -177,7 +186,10 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
         name: tokenProfile.name,
         decimals: tokenProfile.decimals,
         priceUsd: tokenProfile.priceUsd ?? undefined,
-        metadata: toJsonValue(tokenProfile),
+        totalSupply: tokenProfile.totalSupplyFormatted ?? undefined,
+        marketCap: tokenProfile.marketCapUsd ?? undefined,
+        holders: holderStats?.totalHolders ?? undefined,
+        metadata: toJsonValue({ ...tokenProfile, holderStats }),
       },
     });
 
@@ -185,7 +197,7 @@ async function tryLiveLookup(address: string): Promise<SearchResult | null> {
       type: "token",
       title: token.symbol,
       subtitle: `${token.name} (${chain})`,
-      summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.`,
+      summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.${token.holders ? ` ${token.holders.toLocaleString()} holders.` : ""}`,
       risk: riskLabel(token.riskScore),
       href: `/token/${token.address}`,
     };
