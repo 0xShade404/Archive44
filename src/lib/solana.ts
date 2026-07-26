@@ -90,7 +90,7 @@ export async function getSolanaWalletProfile(
   await initMoralis();
 
   const [balance, portfolio] = await Promise.all([
-    Moralis.SolApi.account.balance({ network: "mainnet", address }),
+    Moralis.SolApi.account.getBalance({ network: "mainnet", address }),
     Moralis.SolApi.account
       .getPortfolio({ network: "mainnet", address })
       .catch(() => null),
