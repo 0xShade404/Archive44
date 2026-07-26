@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Github, Twitter, MessageCircle } from "lucide-react";
 
 const footerLinks = {
@@ -26,8 +27,13 @@ export function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
           <div className="col-span-2">
             <Link href="/" className="flex items-center gap-2 mb-4">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-gold to-gold-600 text-navy font-bold text-lg">
-                A44
+              <div className="relative h-9 w-9 overflow-hidden rounded-lg">
+                <Image
+                  src="/logo.jpg"
+                  alt="Archive44 logo"
+                  fill
+                  className="object-contain"
+                />
               </div>
               <span className="text-xl font-semibold">
                 Archive<span className="text-gold">44</span>
