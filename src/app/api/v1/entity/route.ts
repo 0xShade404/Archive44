@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getWalletProfile, buildWalletTimeline } from "@/lib/wallet";
+import { extractRelatedWallets } from "@/lib/related";
 import { getTokenProfile } from "@/lib/token";
 import { getTokenHolderStats } from "@/lib/holders";
 import { getSolanaTokenProfile, getSolanaWalletProfile } from "@/lib/solana";
@@ -66,9 +67,11 @@ async function handleWallet(address: string, chain: string) {
       oldestKnownTxTimestamp: oldestTx ? oldestTx.timestamp : null,
       txCount: profile.recentTransactions.length,
       nativeBalanceEth: parseFloat(profile.nativeBalance) || 0,
+      counterpartyAddresses: extractRelatedWallets(profile, address),
     });
 
     const timeline = buildWalletTimeline(profile, address);
+    const relatedWallets = extractRelatedWallets(profile, address);
 
     const aiSummary = await generateSearchSummary(address, [
       {
@@ -88,7 +91,7 @@ async function handleWallet(address: string, chain: string) {
         lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
         riskScore,
         aiSummary: aiSummary ?? undefined,
-        metadata: toJsonValue({ ...profile, timeline }),
+        metadata: toJsonValue({ ...profile, timeline, relatedWallets }),
       },
       create: {
         address,
@@ -98,7 +101,7 @@ async function handleWallet(address: string, chain: string) {
         lastActive: latestTx ? new Date(latestTx.timestamp) : undefined,
         riskScore,
         aiSummary: aiSummary ?? undefined,
-        metadata: toJsonValue({ ...profile, timeline }),
+        metadata: toJsonValue({ ...profile, timeline, relatedWallets }),
       },
     });
 
