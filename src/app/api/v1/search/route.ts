@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { hashApiKey } from "@/lib/api-key";
 import { generateSearchSummary } from "@/lib/gemini";
+import { getWalletProfile } from "@/lib/wallet";
+import { getTokenProfile } from "@/lib/token";
+import { Prisma } from "@prisma/client";
 
 function riskLabel(score: number): "Low" | "Medium" | "High" {
   if (score < 34) return "Low";
@@ -20,6 +23,13 @@ type SearchResult = {
   href: string;
 };
 
+// Matches a standard EVM address — the only shape we can look up live via Moralis.
+const EVM_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
+
+function toJsonValue(data: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
+}
+
 async function authenticateRequest(request: NextRequest): Promise<{ userId: string | null; apiKeyId: string | null } | null> {
   const authHeader = request.headers.get("authorization");
 
@@ -34,6 +44,82 @@ async function authenticateRequest(request: NextRequest): Promise<{ userId: stri
   if (session?.user) return { userId: session.user.id, apiKeyId: null };
 
   return { userId: null, apiKeyId: null };
+}
+
+// Attempts a live Moralis lookup for an address not found in the local
+// database — tries token metadata first (most contract-address searches are
+// for tokens), then falls back to treating it as a wallet. Caches whichever
+// succeeds into the matching Prisma table so future searches hit the DB
+// directly instead of calling Moralis again.
+async function tryLiveLookup(address: string): Promise<SearchResult | null> {
+  try {
+    const tokenProfile = await getTokenProfile(address, "ethereum");
+    // A contract with no resolvable name/symbol usually means it isn't
+    // actually a token contract — treat that as a miss and fall through.
+    if (tokenProfile.name !== "Unknown Token" || tokenProfile.symbol !== "?") {
+      const token = await prisma.token.upsert({
+        where: { address_chain: { address, chain: "ethereum" } },
+        update: {
+          symbol: tokenProfile.symbol,
+          name: tokenProfile.name,
+          decimals: tokenProfile.decimals,
+          priceUsd: tokenProfile.priceUsd ?? undefined,
+          metadata: toJsonValue(tokenProfile),
+        },
+        create: {
+          address,
+          chain: "ethereum",
+          symbol: tokenProfile.symbol,
+          name: tokenProfile.name,
+          decimals: tokenProfile.decimals,
+          priceUsd: tokenProfile.priceUsd ?? undefined,
+          metadata: toJsonValue(tokenProfile),
+        },
+      });
+
+      return {
+        type: "token",
+        title: token.symbol,
+        subtitle: token.name,
+        summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.`,
+        risk: riskLabel(token.riskScore),
+        href: `/token/${token.address}`,
+      };
+    }
+  } catch {
+    // Not a token contract — fall through to wallet lookup below.
+  }
+
+  try {
+    const walletProfile = await getWalletProfile(address, "ethereum");
+
+    const wallet = await prisma.wallet.upsert({
+      where: { address },
+      update: {
+        balanceEth: parseFloat(walletProfile.nativeBalance) || 0,
+        txCount: walletProfile.recentTransactions.length,
+        metadata: toJsonValue(walletProfile),
+      },
+      create: {
+        address,
+        balanceEth: parseFloat(walletProfile.nativeBalance) || 0,
+        txCount: walletProfile.recentTransactions.length,
+        firstSeen: new Date(),
+        metadata: toJsonValue(walletProfile),
+      },
+    });
+
+    return {
+      type: "wallet",
+      title: wallet.address,
+      subtitle: wallet.ens || wallet.label || "Wallet",
+      summary: `Live data from Moralis. Balance: ${wallet.balanceEth} ETH across ${wallet.txCount} recent transactions.`,
+      risk: riskLabel(wallet.riskScore),
+      href: `/wallet/${wallet.address}`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -140,9 +226,20 @@ export async function GET(request: NextRequest) {
     })),
   ];
 
+  // No local matches, but the query looks like a real address — try a live
+  // Moralis lookup instead of just returning "no results found."
+  let liveResult = false;
+  if (results.length === 0 && EVM_ADDRESS_REGEX.test(q)) {
+    const live = await tryLiveLookup(q);
+    if (live) {
+      results.push(live);
+      liveResult = true;
+    }
+  }
+
   const templateSummary =
     results.length > 0
-      ? `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${q}" across the Archive44 knowledge base.`
+      ? `Found ${results.length} result${results.length === 1 ? "" : "s"} for "${q}"${liveResult ? " (fetched live)" : " across the Archive44 knowledge base"}.`
       : `No archived entities matched "${q}" yet. Try a wallet address, token symbol, protocol, or founder name.`;
 
   const aiSummary = await generateSearchSummary(q, results).catch(() => null);
@@ -175,6 +272,7 @@ export async function GET(request: NextRequest) {
       latency_ms: Date.now() - startedAt,
       version: "1.0",
       ai_generated: aiSummary !== null,
+      live_lookup: liveResult,
     },
   });
 }
