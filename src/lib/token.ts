@@ -17,6 +17,8 @@ export interface TokenProfile {
   decimals: number;
   priceUsd: number | null;
   logoUrl: string | null;
+  totalSupplyFormatted: string | null;
+  marketCapUsd: number | null;
   recentTransfers: {
     hash: string;
     from: string;
@@ -33,6 +35,8 @@ interface RawTokenMetadata {
   symbol: string | null;
   decimals: string | null;
   logo: string | null;
+  total_supply_formatted: string | null;
+  fully_diluted_valuation: string | null;
 }
 
 interface RawTokenPrice {
@@ -86,6 +90,13 @@ export async function getTokenProfile(
     decimals: Number(metaRaw.decimals ?? 18),
     priceUsd: priceRaw ? priceRaw.usdPrice : null,
     logoUrl: metaRaw.logo ?? null,
+    totalSupplyFormatted: metaRaw.total_supply_formatted ?? null,
+    // Note: Moralis's fully_diluted_valuation is price × total supply, not
+    // circulating supply — this is FDV, a common proxy for market cap but
+    // not identical to it for tokens with significant locked/unissued supply.
+    marketCapUsd: metaRaw.fully_diluted_valuation
+      ? Number(metaRaw.fully_diluted_valuation)
+      : null,
     recentTransfers: transfersRaw.map((t) => ({
       hash: t.transaction_hash,
       from: t.from_address,
