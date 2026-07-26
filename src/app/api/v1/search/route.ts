@@ -4,8 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { hashApiKey } from "@/lib/api-key";
 import { generateSearchSummary } from "@/lib/gemini";
-import { getWalletProfile } from "@/lib/wallet";
+import { getWalletProfile, buildWalletTimeline } from "@/lib/wallet";
 import { getTokenProfile } from "@/lib/token";
+import { getSolanaTokenProfile, getSolanaWalletProfile } from "@/lib/solana";
+import { computeWalletRiskScore } from "@/lib/risk";
 import { Prisma } from "@prisma/client";
 
 function riskLabel(score: number): "Low" | "Medium" | "High" {
@@ -23,8 +25,22 @@ type SearchResult = {
   href: string;
 };
 
-// Matches a standard EVM address — the only shape we can look up live via Moralis.
+// EVM addresses: 0x + 40 hex chars.
 const EVM_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
+// Solana addresses: base58-encoded, no 0x prefix, typically 32-44 chars.
+// Base58 excludes 0, O, I, l to avoid visual ambiguity.
+const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+// EVM chains to try in order when a contract address doesn't specify which
+// chain it's on — same address can exist as different tokens across chains,
+// so we check the most commonly-used ones first.
+const EVM_CHAINS_TO_TRY: Array<"ethereum" | "base" | "polygon" | "bsc" | "arbitrum"> = [
+  "ethereum",
+  "base",
+  "polygon",
+  "bsc",
+  "arbitrum",
+];
 
 function toJsonValue(data: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
@@ -46,66 +62,163 @@ async function authenticateRequest(request: NextRequest): Promise<{ userId: stri
   return { userId: null, apiKeyId: null };
 }
 
-// Attempts a live Moralis lookup for an address not found in the local
-// database — tries token metadata first (most contract-address searches are
-// for tokens), then falls back to treating it as a wallet. Caches whichever
-// succeeds into the matching Prisma table so future searches hit the DB
-// directly instead of calling Moralis again.
+// Tries a token address against each supported EVM chain in turn, returning
+// the first one that resolves to a real token (not just an "Unknown Token"
+// placeholder, which means the contract doesn't exist as an ERC-20 on that
+// particular chain).
+async function tryEvmTokenAcrossChains(
+  address: string
+): Promise<{ chain: string; profile: Awaited<ReturnType<typeof getTokenProfile>> } | null> {
+  for (const chain of EVM_CHAINS_TO_TRY) {
+    try {
+      const profile = await getTokenProfile(address, chain);
+      if (profile.name !== "Unknown Token" || profile.symbol !== "?") {
+        return { chain, profile };
+      }
+    } catch {
+      // Not a token on this chain — try the next one.
+    }
+  }
+  return null;
+}
+
 async function tryLiveLookup(address: string): Promise<SearchResult | null> {
-  try {
-    const tokenProfile = await getTokenProfile(address, "ethereum");
-    // A contract with no resolvable name/symbol usually means it isn't
-    // actually a token contract — treat that as a miss and fall through.
-    if (tokenProfile.name !== "Unknown Token" || tokenProfile.symbol !== "?") {
-      const token = await prisma.token.upsert({
-        where: { address_chain: { address, chain: "ethereum" } },
-        update: {
-          symbol: tokenProfile.symbol,
-          name: tokenProfile.name,
-          decimals: tokenProfile.decimals,
-          priceUsd: tokenProfile.priceUsd ?? undefined,
-          metadata: toJsonValue(tokenProfile),
-        },
+  // Solana addresses are structurally distinct from EVM ones — check first.
+  if (SOLANA_ADDRESS_REGEX.test(address) && !EVM_ADDRESS_REGEX.test(address)) {
+    try {
+      const solProfile = await getSolanaTokenProfile(address);
+      if (solProfile.name !== "Unknown Token" || solProfile.symbol !== "?") {
+        const token = await prisma.token.upsert({
+          where: { address_chain: { address, chain: "solana" } },
+          update: {
+            symbol: solProfile.symbol,
+            name: solProfile.name,
+            decimals: solProfile.decimals,
+            priceUsd: solProfile.priceUsd ?? undefined,
+            metadata: toJsonValue(solProfile),
+          },
+          create: {
+            address,
+            chain: "solana",
+            symbol: solProfile.symbol,
+            name: solProfile.name,
+            decimals: solProfile.decimals,
+            priceUsd: solProfile.priceUsd ?? undefined,
+            metadata: toJsonValue(solProfile),
+          },
+        });
+
+        return {
+          type: "token",
+          title: token.symbol,
+          subtitle: `${token.name} (Solana)`,
+          summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.`,
+          risk: riskLabel(token.riskScore),
+          href: `/token/${token.address}`,
+        };
+      }
+    } catch {
+      // Not a resolvable Solana token — fall through to wallet check below.
+    }
+
+    // Not a token — try it as a Solana wallet instead.
+    try {
+      const existing = await prisma.wallet.findUnique({ where: { address } });
+      const solWallet = await getSolanaWalletProfile(address);
+      const nativeBalance = parseFloat(solWallet.nativeBalanceSol) || 0;
+      const existingTags = existing?.tags ?? [];
+      const tags = existingTags.includes("solana") ? existingTags : [...existingTags, "solana"];
+
+      const wallet = await prisma.wallet.upsert({
+        where: { address },
+        update: { balanceEth: nativeBalance, tags, metadata: toJsonValue(solWallet) },
         create: {
           address,
-          chain: "ethereum",
-          symbol: tokenProfile.symbol,
-          name: tokenProfile.name,
-          decimals: tokenProfile.decimals,
-          priceUsd: tokenProfile.priceUsd ?? undefined,
-          metadata: toJsonValue(tokenProfile),
+          balanceEth: nativeBalance,
+          txCount: 0,
+          firstSeen: new Date(),
+          tags,
+          metadata: toJsonValue(solWallet),
         },
       });
 
       return {
-        type: "token",
-        title: token.symbol,
-        subtitle: token.name,
-        summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.`,
-        risk: riskLabel(token.riskScore),
-        href: `/token/${token.address}`,
+        type: "wallet",
+        title: wallet.address,
+        subtitle: "Solana Wallet",
+        summary: `Live data from Moralis. Balance: ${wallet.balanceEth} SOL.`,
+        risk: riskLabel(wallet.riskScore),
+        href: `/wallet/${wallet.address}`,
       };
+    } catch {
+      return null;
     }
-  } catch {
-    // Not a token contract — fall through to wallet lookup below.
   }
 
+  if (!EVM_ADDRESS_REGEX.test(address)) return null;
+
+  // Try as an EVM token across supported chains first.
+  const evmToken = await tryEvmTokenAcrossChains(address);
+  if (evmToken) {
+    const { chain, profile: tokenProfile } = evmToken;
+    const token = await prisma.token.upsert({
+      where: { address_chain: { address, chain } },
+      update: {
+        symbol: tokenProfile.symbol,
+        name: tokenProfile.name,
+        decimals: tokenProfile.decimals,
+        priceUsd: tokenProfile.priceUsd ?? undefined,
+        metadata: toJsonValue(tokenProfile),
+      },
+      create: {
+        address,
+        chain,
+        symbol: tokenProfile.symbol,
+        name: tokenProfile.name,
+        decimals: tokenProfile.decimals,
+        priceUsd: tokenProfile.priceUsd ?? undefined,
+        metadata: toJsonValue(tokenProfile),
+      },
+    });
+
+    return {
+      type: "token",
+      title: token.symbol,
+      subtitle: `${token.name} (${chain})`,
+      summary: `Live data from Moralis. Price: ${token.priceUsd ? `$${token.priceUsd}` : "unavailable"}.`,
+      risk: riskLabel(token.riskScore),
+      href: `/token/${token.address}`,
+    };
+  }
+
+  // Not a token on any supported chain — try it as an Ethereum wallet.
   try {
     const walletProfile = await getWalletProfile(address, "ethereum");
+    const oldestTx = walletProfile.recentTransactions[walletProfile.recentTransactions.length - 1];
+
+    const riskScore = computeWalletRiskScore({
+      oldestKnownTxTimestamp: oldestTx ? oldestTx.timestamp : null,
+      txCount: walletProfile.recentTransactions.length,
+      nativeBalanceEth: parseFloat(walletProfile.nativeBalance) || 0,
+    });
+
+    const timeline = buildWalletTimeline(walletProfile, address);
 
     const wallet = await prisma.wallet.upsert({
       where: { address },
       update: {
         balanceEth: parseFloat(walletProfile.nativeBalance) || 0,
         txCount: walletProfile.recentTransactions.length,
-        metadata: toJsonValue(walletProfile),
+        riskScore,
+        metadata: toJsonValue({ ...walletProfile, timeline }),
       },
       create: {
         address,
         balanceEth: parseFloat(walletProfile.nativeBalance) || 0,
         txCount: walletProfile.recentTransactions.length,
         firstSeen: new Date(),
-        metadata: toJsonValue(walletProfile),
+        riskScore,
+        metadata: toJsonValue({ ...walletProfile, timeline }),
       },
     });
 
@@ -227,9 +340,9 @@ export async function GET(request: NextRequest) {
   ];
 
   // No local matches, but the query looks like a real address — try a live
-  // Moralis lookup instead of just returning "no results found."
+  // lookup across EVM chains and Solana instead of just returning "no results found."
   let liveResult = false;
-  if (results.length === 0 && EVM_ADDRESS_REGEX.test(q)) {
+  if (results.length === 0 && (EVM_ADDRESS_REGEX.test(q) || SOLANA_ADDRESS_REGEX.test(q))) {
     const live = await tryLiveLookup(q);
     if (live) {
       results.push(live);
