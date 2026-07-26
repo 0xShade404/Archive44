@@ -99,6 +99,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id;
         token.role = (user as { role?: string }).role ?? "USER";
       }
+
+      // Auto-promote specific email addresses to ADMIN, regardless of what's
+      // stored in the database. Configured via ADMIN_EMAILS env var
+      // (comma-separated), not hardcoded, so the list can change without a
+      // code deploy and doesn't put real email addresses in source control.
+      const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (token.email && adminEmails.includes(token.email.toLowerCase())) {
+        token.role = "ADMIN";
+      }
+
       return token;
     },
     async session({ session, token }) {
