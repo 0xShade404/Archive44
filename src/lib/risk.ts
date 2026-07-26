@@ -18,10 +18,22 @@
 // - Native balance: near-zero balance combined with token/NFT activity can
 //   indicate a wallet that's been drained.
 
+// A small set of publicly documented drainer/scam addresses. This is NOT
+// comprehensive — it's a starting point, not a security product. Treat any
+// hit as a strong signal worth showing to the user, but don't treat absence
+// from this list as "safe." A real risk product would pull from a
+// maintained threat-intel feed instead of a hardcoded list.
+const KNOWN_RISKY_ADDRESSES = new Set<string>([
+  // Populate with addresses from a maintained source (e.g. Chainalysis,
+  // ScamSniffer, or a Moralis-integrated threat feed) rather than hand-typed
+  // entries — leaving empty for now rather than shipping unverified addresses.
+]);
+
 interface RiskInput {
   oldestKnownTxTimestamp: string | null; // ISO timestamp of oldest tx in the fetched batch
   txCount: number;
   nativeBalanceEth: number;
+  counterpartyAddresses?: string[];
 }
 
 export function computeWalletRiskScore(input: RiskInput): number {
@@ -49,6 +61,15 @@ export function computeWalletRiskScore(input: RiskInput): number {
   // or pass-through wallet used briefly then abandoned.
   if (input.nativeBalanceEth < 0.0001) score += 30;
   else if (input.nativeBalanceEth < 0.001) score += 15;
+
+  // Direct interaction with a known-risky address is a strong signal —
+  // this overrides the capped heuristic score below with a high floor.
+  const hasRiskyInteraction = input.counterpartyAddresses?.some((addr) =>
+    KNOWN_RISKY_ADDRESSES.has(addr.toLowerCase())
+  );
+  if (hasRiskyInteraction) {
+    return Math.max(85, Math.min(100, score));
+  }
 
   return Math.min(100, score);
 }
