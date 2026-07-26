@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -23,8 +24,14 @@ export function Navbar() {
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-navy/80 backdrop-blur-xl">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2 group">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-gold to-gold-600 text-navy font-bold text-lg shadow-lg shadow-gold/20 group-hover:shadow-gold/40 transition-shadow">
-            A44
+          <div className="relative h-9 w-9 overflow-hidden rounded-lg shadow-lg shadow-gold/20 group-hover:shadow-gold/40 transition-shadow">
+            <Image
+              src="/logo.jpg"
+              alt="Archive44 logo"
+              fill
+              className="object-cover"
+              priority
+            />
           </div>
           <span className="text-xl font-semibold tracking-tight hidden sm:block">
             Archive<span className="text-gold">44</span>
